@@ -1,177 +1,207 @@
-import React, { useState } from "react";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 import { ExamWeek as ExamWeekType, Exam } from "@shared/schema";
-import { SubjectIcon, getSubjectName } from "./SubjectIcons";
-import { Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { useExams } from "@/hooks/useExams";
-import { useToast } from "@/hooks/use-toast";
-import AddExamSubjectModal from "./AddExamSubjectModal";
+import { SubjectIcon, getSubjectLightColor, getSubjectName } from "./SubjectIcons";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Trash2, GripVertical } from "lucide-react";
+import dayjs from "dayjs";
+import "dayjs/locale/ar";
+import duration from "dayjs/plugin/duration";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
+
+dayjs.extend(duration);
+dayjs.locale("ar");
 
 interface ExamWeekProps {
   week: ExamWeekType;
   exams: Exam[];
+  onDelete?: (id: number | string) => void;
 }
 
-const ExamWeek: React.FC<ExamWeekProps> = ({ week, exams }) => {
-  const [isOpen, setIsOpen] = useState(week.id === 1); // Open first week by default
-  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
+const ExamWeek: React.FC<ExamWeekProps> = ({ exams, onDelete }) => {
   const { isAdmin } = useAuth();
-  const { deleteExam, deleteExamWeek } = useExams();
-  const { toast } = useToast();
+  const [remainingTimes, setRemainingTimes] = useState<{ [key: string]: string }>({});
+  const [sortedExams, setSortedExams] = useState<Exam[]>([]);
+  const [isDraggable, setIsDraggable] = useState(false);
 
-  const handleDeleteExam = async (id: number) => {
-    try {
-      await deleteExam(id);
-      toast({
-        title: "تم حذف الاختبار",
-        description: "تم حذف الاختبار بنجاح",
-      });
-    } catch (error) {
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ أثناء حذف الاختبار",
-        variant: "destructive",
-      });
-    }
+  useEffect(() => {
+    setSortedExams(
+      [...exams].sort((a, b) => dayjs(a.date).diff(dayjs(b.date)))
+    );
+  }, [exams]);
+
+  const calculateRemainingTime = (date: string) => {
+    const examDate = dayjs(date).hour(3).minute(0); // اليوم ينتهي 3:00 فجرًا
+    const now = dayjs();
+    const diff = examDate.diff(now);
+
+    if (diff <= 0) return "انتهى الوقت";
+
+    const duration = dayjs.duration(diff);
+    const days = Math.floor(duration.asDays());
+    const hours = duration.hours();
+    const minutes = duration.minutes();
+    const seconds = duration.seconds();
+
+    if (days > 1) return `${days} يوم`;
+    if (days === 1) return `1 يوم ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const handleDeleteWeek = async () => {
-    try {
-      await deleteExamWeek(week.id);
-      toast({
-        title: "تم حذف الأسبوع",
-        description: "تم حذف أسبوع الاختبارات بنجاح",
+  useEffect(() => {
+    const updateTimes = () => {
+      const times: { [key: string]: string } = {};
+      sortedExams.forEach((exam, index) => {
+        const validId = exam.id || `exam-${index}`;
+        times[validId] = calculateRemainingTime(exam.date);
       });
-    } catch (error) {
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ أثناء حذف أسبوع الاختبارات",
-        variant: "destructive",
-      });
-    }
+      setRemainingTimes(times);
+    };
+
+    updateTimes();
+    const interval = setInterval(updateTimes, 1000);
+    return () => clearInterval(interval);
+  }, [sortedExams]);
+
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+
+    const items = Array.from(sortedExams);
+    const [movedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, movedItem);
+    setSortedExams(items);
+  };
+
+  const deleteExam = (id: number | string) => {
+    onDelete?.(id);
   };
 
   return (
-    <>
-      <Accordion
-        type="single"
-        collapsible
-        value={isOpen ? `week-${week.id}` : ""}
-        onValueChange={(val) => setIsOpen(val === `week-${week.id}`)}
-      >
-        <AccordionItem value={`week-${week.id}`} className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden border-none">
-          <div className="flex justify-between items-center px-6 py-4">
-            <AccordionTrigger className="text-lg font-bold hover:no-underline flex-1 text-right">
-              {week.title}
-            </AccordionTrigger>
-            
-            {isAdmin && (
-              <div className="flex items-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowAddSubjectModal(true);
-                  }}
-                  className="mr-2 text-primary hover:text-primary-dark flex items-center gap-1"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>إضافة مادة</span>
-                </Button>
-                
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteWeek();
-                  }}
-                  className="mr-2 text-red-500 hover:text-red-700 hover:bg-red-100"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </div>
-          
-          <AccordionContent>
-            <div className="border-t border-gray-200 dark:border-gray-700">
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-900">
-                    <tr>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">اليوم</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">المادة</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">التاريخ</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">الدروس المقررة</th>
-                      {isAdmin && (
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">إجراءات</th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {exams.length > 0 ? (
-                      exams.map((exam) => (
-                        <tr key={exam.id}>
-                          <td className="px-6 py-4 whitespace-nowrap">{exam.day}</td>
-                          <td className="px-6 py-4 whitespace-nowrap flex items-center">
-                            <SubjectIcon subject={exam.subject as any} className="ml-2" />
-                            {getSubjectName(exam.subject as any)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">{exam.date}</td>
-                          <td className="px-6 py-4">
-                            <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300">
-                              {exam.topics.map((topic, index) => (
-                                <li key={index}>{topic}</li>
-                              ))}
-                            </ul>
-                          </td>
-                          {isAdmin && (
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+    <div className="space-y-4">
+
+      <DragDropContext onDragEnd={handleDragEnd}>
+        <Droppable droppableId="exams">
+          {(provided, snapshot) => (
+            <div
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+              className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${
+                snapshot.isDraggingOver ? "bg-accent/10 rounded-lg p-4" : ""
+              }`}
+            >
+              {sortedExams.map((exam, index) => {
+                const subjectClass = getSubjectLightColor(exam.subject as any);
+                const subjectName = getSubjectName(exam.subject as any);
+
+                const validId = exam.id || `exam-${index}-${exam.subject}-${exam.date.replace(/[^\w]/g, '')}`;
+                const validDraggableId = `draggable-${validId}`;
+
+                return isDraggable ? (
+                  <Draggable
+                    key={validId}
+                    draggableId={validDraggableId}
+                    index={index}
+                  >
+                    {(provided) => (
+                      <div ref={provided.innerRef} {...provided.draggableProps}>
+                        <Card className="overflow-hidden">
+                          <div className={`p-4 ${subjectClass} flex items-center justify-between`}>
+                            <div className="flex items-center gap-2">
+                              <div {...provided.dragHandleProps}>
+                                <GripVertical className="w-5 h-5 cursor-move" />
+                              </div>
+                              <SubjectIcon subject={exam.subject as any} className="w-6 h-6" />
+                              <span className="font-semibold">{subjectName}</span>
+                            </div>
+                            {isAdmin && (
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => handleDeleteExam(exam.id)}
-                                className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteExam(exam.id);
+                                }}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-100/10"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="w-4 h-4" />
                               </Button>
-                            </td>
-                          )}
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={isAdmin ? 5 : 4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">
-                          لا توجد اختبارات لهذا الأسبوع
-                        </td>
-                      </tr>
+                            )}
+                          </div>
+                          <ExamDetails exam={exam} remainingTime={remainingTimes[validId]} />
+                        </Card>
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              </div>
+                  </Draggable>
+                ) : (
+                  <div key={validId}>
+                    <Card className="overflow-hidden">
+                      <div className={`p-4 ${subjectClass} flex items-center justify-between`}>
+                        <div className="flex items-center gap-2">
+                          <SubjectIcon subject={exam.subject as any} className="w-6 h-6" />
+                          <span className="font-semibold">{subjectName}</span>
+                        </div>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteExam(exam.id);
+                            }}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-100/10"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <ExamDetails exam={exam} remainingTime={remainingTimes[validId]} />
+                    </Card>
+                  </div>
+                );
+              })}
+              {provided.placeholder}
             </div>
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
-      
-      {showAddSubjectModal && (
-        <AddExamSubjectModal
-          isOpen={showAddSubjectModal}
-          onClose={() => setShowAddSubjectModal(false)}
-          weekId={week.id}
-          weekTitle={week.title}
-        />
-      )}
-    </>
+          )}
+        </Droppable>
+      </DragDropContext>
+    </div>
+  );
+};
+
+const ExamDetails = ({
+  exam,
+  remainingTime,
+}: {
+  exam: Exam;
+  remainingTime: string;
+}) => {
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="text-gray-600 dark:text-gray-400">اليوم:</span>
+        <span>{dayjs(exam.date).format("dddd")}</span>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <span className="text-gray-600 dark:text-gray-400">التاريخ:</span>
+        <span>{dayjs(exam.date).format("DD/MM/YYYY")}</span>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <span className="text-gray-600 dark:text-gray-400">الوقت المتبقي:</span>
+        <span className="font-medium">{remainingTime}</span>
+      </div>
+
+      <div className="mt-4">
+        <span className="text-gray-600 dark:text-gray-400 block mb-2">الدروس المقررة:</span>
+        <ul className="list-disc list-inside space-y-1">
+          {exam.topics.map((topic, index) => (
+            <li key={index} className="text-sm">{topic}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 };
 
